@@ -1,0 +1,243 @@
+use std::str::FromStr;
+
+use crate::ast::*;
+
+grammar;
+
+pub Document: Vec<Statement<'input>> = {
+    <Item*>
+}
+
+match {
+    r"/\*([^*]|\*[^/]|\n)*\*/" => {}, // C-style comments
+    r"//[^\n\r]*[\n\r]*" => {},       // C++-style comments
+} else {
+    // Parse full numbers first, if possible
+    r"(?i)([0-9]*\.?[0-9]+e[0-9]+|[0-9]*\.?[0-9]+)" => FloatLiteral
+} else {
+    r"\s*" => { },
+    _
+}
+
+// A statement in the doc
+Item: Statement<'input> = {
+    // Module definition - not an actual object.
+    "module" <name:Ident> "(" <args:Arguments> ")" <body:Item> => Statement::ModuleDefinition{
+        name,
+        args,
+        body: Box::new(body)
+    },
+    // Function definition - not an actual object.
+    "function" <Ident> "(" <Arguments> ")" "=" <Expr> ";" => Statement::FunctionDefinition(<>),
+    <IncludePath>,
+    <UsePath>,
+    Statement,
+    "{" <Item*> "}" => Statement::StatementList(<>),
+    ";" => Statement::NoOp,
+}
+
+ClosedCall = ModuleCall<ClosedCallList>;
+OpenCall = ModuleCall<OpenCallList>;
+
+// Call a module
+ModuleCall<T>: Statement<'input> = {
+    // Single module call
+    <modifier:(Modifier)?> <function:ModuleName> "(" <params:Parameters> ")" <children:T> => Statement::ModuleCall(ModuleCall{<>}),
+
+    // for-list
+    <modifier:(Modifier)?> "for" "(" <variables:Parameters> ")" <body:T> => Statement::For{<>},
+}
+
+ModuleName: &'input str = {
+    Ident,
+    "echo",
+    "let",
+    "assert",
+}
+
+Modifier: Modifier = {
+    "*" => Modifier::Disable,
+    "!" => Modifier::ShowOnly,
+    "#" => Modifier::Highlight,
+    "%" => Modifier::Transparent,
+}
+
+CallList: Vec<Statement<'input>> = {
+    ClosedCallList,
+    OpenCallList,
+}
+
+// ClosedCallList is a closed list of statements. Cannot end with a dangling if.
+ClosedCallList: Vec<Statement<'input>> = {
+    ";" => vec![],
+    ClosedStatement => vec![<>],
+    "{" <Statement*> "}" => <>
+}
+
+OpenCallList: Vec<Statement<'input>> = {
+    OpenStatement => vec![<>],
+}
+
+// Describe an actual object - not just a _definition_.
+Statement: Statement<'input> = {
+    OpenStatement,
+    ClosedStatement,
+}
+
+
+// We're ending with a dangling if, so careful what comes next
+// Something "Open" means it _could_ be followed by an "else".
+OpenStatement: Statement<'input> = {
+    "if" "(" <Expr> ")" <CallList> => Statement::make_if(<>),
+    "if" "(" <Expr> ")" <ClosedCallList> "else" <OpenStatement> => Statement::make_if_else(<>),
+    OpenCall,
+}
+
+// We swear we cannot be a dangling "if"
+ClosedStatement: Statement<'input> = {
+    "if" "(" <condition: Expr> ")" <if_true:ClosedCallList> "else" <if_false:ClosedCallList> => Statement::If{<>},
+    ClosedCall,
+    <Ident> "=" <Expr> ";" => Statement::VariableDeclaration(<>),
+}
+
+Ident: &'input str = {
+    r"[$_a-zA-Z0-9]+\w*"
+}
+
+UsePath: Statement<'input> = {
+    <s:r"use\s*<[^<>\n]*>"> => Statement::Use(&s[s.find('<').unwrap()+1..s.len()-1]),
+}
+
+IncludePath: Statement<'input> = {
+    <s:r"include\s*<[^<>\n]*>"> => Statement::Include(&s[s.find('<').unwrap()+1..s.len()-1]),
+}
+
+StrValue: &'input str = {
+    // String literal with escapes - anything except slashes, or some specific backslashes.
+    <s:r#""([^"\\]|\\.)*""#> => &s[1..s.len()-1],
+}
+
+Parameters = Comma<Parameter>;
+Arguments = Comma<Argument>;
+
+Parameter: ParameterValue<'input> = {
+    <name:Ident> "=" <value:Expr> => ParameterValue { name: Some(name), value },
+    <value:Expr> => ParameterValue { name: None, value }
+}
+
+Argument: ParameterDefinition<'input> = {
+    <name:Ident> => ParameterDefinition { name, default_value: None },
+    <name:Ident> "=" <default_value:Expr> => ParameterDefinition { name, default_value: Some(default_value) },
+}
+
+Let: Expr<'input> = {
+    "let" "(" <p:Parameters> ")" <t:Expr> => Expr::Let(p, Box::new(t)),
+}
+
+Expr: Expr<'input> = {
+    Let,
+    "-" <Let> => Expr::Negative(Box::new(<>)),  // Unary negative expression.
+    "!" <Let> => Expr::Not(Box::new(<>)),  // Unary negation
+    "+" <Let>,  // Noop "plus" expression.
+    <a:SubTernary> "?" <b:Expr> ":" <c:Expr> => Expr::Ternary {
+        condition: Box::new(a),
+        if_true: Box::new(b),
+        if_false: Box::new(c),
+    },
+    SubTernary,
+}
+
+SubTernary: Expr<'input> = {
+    <a:SubTernary> "||" <b:SubBitwise> => Expr::Or(Box::new(a), Box::new(b)),
+    <a:SubTernary> "&&" <b:SubBitwise> => Expr::And(Box::new(a), Box::new(b)),
+    SubBitwise,
+}
+
+SubBitwise: Expr<'input> = {
+    <a:SubBitwise> <op:Compare> <b:SubCompare> => Expr::Op(Box::new(a), op, Box::new(b)),
+    SubCompare,
+}
+
+SubCompare: Expr<'input> = {
+    <a:SubCompare> <op:ExprOp> <b:Factor> => Expr::Op(Box::new(a), op, Box::new(b)),
+    Factor,
+}
+
+Factor: Expr<'input> = {
+    <a:Factor> <op:FactorOp> <b:Negateable> => Expr::Op(Box::new(a), op, Box::new(b)),
+    Negateable,
+}
+
+ExprOp: Opcode = {
+    "+" => Opcode::Add,
+    "-" => Opcode::Sub,
+}
+
+FactorOp: Opcode = {
+    "*" => Opcode::Mul,
+    "/" => Opcode::Div,
+    "%" => Opcode::Rem,
+}
+
+Compare: Opcode = {
+    ">" => Opcode::Gt,
+    ">=" => Opcode::Gte,
+    "==" => Opcode::Equal,
+    "!=" => Opcode::NotEqual,
+    "<=" => Opcode::Lte,
+    "<" => Opcode::Lt,
+}
+
+
+
+Negateable: Expr<'input> = {
+    "-" <Negateable> => Expr::Negative(Box::new(<>)),
+    "!" <Negateable> => Expr::Not(Box::new(<>)),
+    "+" <Negateable>,
+    Echo
+}
+
+Echo: Expr<'input> = {
+    "echo" "(" <p:Parameters> ")" <t:Echo> => Expr::Echo(p, Box::new(t)),
+    "assert" "(" <p:Parameters> ")" <t:Echo> => Expr::Assert(p, Box::new(t)),
+    Term,
+}
+
+Term: Expr<'input> = {
+    "undef" => Expr::Undef,
+    "true" => Expr::Boolean(true),
+    "false" => Expr::Boolean(false),
+    <StrValue> => Expr::Text(<>),
+    <Number> => Expr::Number(<>),
+    <Ident> => Expr::Variable(<>),
+    "[" <Comma<Expr>> "]" => Expr::Vector(<>),
+    "[" <start:Expr> <increment:(":" <Expr>)?> ":" <end:Expr> "]" => Expr::range(<>),
+    Function => Expr::Function(<>),
+    <array:Term> "[" <index:Expr> "]" => Expr::array_access(<>),
+    "[" <steps:Let*> "for" "(" <variables:Parameters> ")" <body:Expr> "]" => Expr::ListComprehension {
+        steps,
+        variables,
+        body: Box::new(body)
+    },
+    "(" <Expr> ")",
+}
+
+Function: FunctionCall<'input> = {
+    <name:Ident> "(" <parameters:Parameters> ")" => FunctionCall{<>},
+}
+
+Number: f32 = {
+    FloatLiteral => f32::from_str(<>).unwrap(),
+    <s:r"[0-9]+\."> => f32::from_str(&s[..s.len()-1]).unwrap(),
+}
+
+Comma<T>: Vec<T> = {
+    <v:(<T> ",")*> <e:T?> => match e {
+        None => v,
+        Some(e) => {
+            let mut v = v;
+            v.push(e);
+            v
+        }
+    }
+}

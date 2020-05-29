@@ -1,0 +1,16 @@
+[package]
+name = "rscad"
+version = "0.1.0"
+authors = ["Alexandre Bury <abury@argo.ai>"]
+edition = "2018"
+build = "build.rs"
+
+[dependencies]
+lalrpop-util = "0.19"
+regex = {version="1.0.6", features=["pattern"]}
+
+[build-dependencies]
+lalrpop = { version = "0.19", features = ["lexer"] }
+
+[features]
+rebuild = []
