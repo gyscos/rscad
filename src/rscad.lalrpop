@@ -33,7 +33,6 @@ Item: Statement<'input> = {
     <UsePath>,
     Statement,
     "{" <Item*> "}" => Statement::StatementList(<>),
-    ";" => Statement::NoOp,
 }
 
 ClosedCall = ModuleCall<ClosedCallList>;
@@ -69,7 +68,6 @@ CallList: Vec<Statement<'input>> = {
 
 // ClosedCallList is a closed list of statements. Cannot end with a dangling if.
 ClosedCallList: Vec<Statement<'input>> = {
-    ";" => vec![],
     ClosedStatement => vec![<>],
     "{" <Statement*> "}" => <>
 }
@@ -95,6 +93,7 @@ OpenStatement: Statement<'input> = {
 
 // We swear we cannot be a dangling "if"
 ClosedStatement: Statement<'input> = {
+    ";" => Statement::NoOp,
     "if" "(" <condition: Expr> ")" <if_true:ClosedCallList> "else" <if_false:ClosedCallList> => Statement::If{<>},
     ClosedCall,
     <Ident> "=" <Expr> ";" => Statement::VariableDeclaration(<>),
@@ -241,7 +240,7 @@ Number: f32 = {
 }
 
 Comma<T>: Vec<T> = {
-    <v:(<T> ",")*> <e:T?> => match e {
+    <v:(<T> ","+)*> <e:T?> => match e {
         None => v,
         Some(e) => {
             let mut v = v;
