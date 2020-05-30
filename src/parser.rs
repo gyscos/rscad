@@ -19,6 +19,24 @@ pub type ModuleId = Id;
 #[derive(Clone, Debug)]
 pub enum Operator {}
 
+#[derive(Clone, Debug)]
+pub enum Axis {
+    X,
+    Y,
+    Z,
+}
+
+impl Axis {
+    fn from_str(field: &str) -> Option<Self> {
+        Some(match field {
+            "x" => Axis::X,
+            "y" => Axis::Y,
+            "z" => Axis::Z,
+            _ => return None,
+        })
+    }
+}
+
 /// Represent a parsed expression.
 #[derive(Clone, Debug)]
 pub enum Expr {
@@ -35,7 +53,7 @@ pub enum Expr {
     Let(Vec<ParameterValue>, Box<Expr>),
     Function(FunctionId, Vec<ParameterValue>),
     ListComprehension {
-        steps: Vec<Expr>,
+        lets: Vec<Expr>,
         variables: Vec<ParameterValue>,
         body: Box<Expr>,
     },
@@ -43,6 +61,10 @@ pub enum Expr {
     Op(Box<Expr>, ast::Opcode, Box<Expr>),
     Or(Box<Expr>, Box<Expr>),
     And(Box<Expr>, Box<Expr>),
+    FieldAccess {
+        parent: Box<Expr>,
+        field: Axis,
+    },
     ArrayAccess {
         array: Box<Expr>,
         index: Box<Expr>,
@@ -166,7 +188,7 @@ fn parse_expr<'a>(expr: ast::Expr, context: &Context<'a>) -> Expr {
             .find_function(name)
             .map(|fid| Expr::Function(fid, parse_parameter_values(parameters, context)))
             .unwrap_or_else(|| {
-                format!("Could not find function `{}`", name);
+                log::warn!("Could not find function `{}`", name);
                 Expr::Undef
             }),
         ast::Expr::Negative(expr) => Expr::Negative(parse_boxed_expr(expr)),
@@ -179,13 +201,24 @@ fn parse_expr<'a>(expr: ast::Expr, context: &Context<'a>) -> Expr {
             parse_parameter_values(params, context),
             parse_boxed_expr(expr),
         ),
-        ast::Expr::Let(params, expr) => Expr::Let(
-            parse_parameter_values(params, context),
+        ast::Expr::Let(lets, expr) => Expr::Let(
+            lets.into_iter()
+                .flat_map(|params| parse_parameter_values(params.vars, context))
+                .collect(),
             parse_boxed_expr(expr),
         ),
         ast::Expr::Or(a, b) => Expr::Or(parse_boxed_expr(a), parse_boxed_expr(b)),
         ast::Expr::And(a, b) => Expr::And(parse_boxed_expr(a), parse_boxed_expr(b)),
         ast::Expr::Op(a, op, b) => Expr::Op(parse_boxed_expr(a), op, parse_boxed_expr(b)),
+        ast::Expr::FieldAccess { parent, field } => Axis::from_str(field)
+            .map(|field| Expr::FieldAccess {
+                parent: parse_boxed_expr(parent),
+                field,
+            })
+            .unwrap_or_else(|| {
+                log::warn!("Unrecognized field access `{}`", field);
+                Expr::Undef
+            }),
         ast::Expr::ArrayAccess { array, index } => Expr::ArrayAccess {
             array: parse_boxed_expr(array),
             index: parse_boxed_expr(index),
@@ -209,11 +242,11 @@ fn parse_expr<'a>(expr: ast::Expr, context: &Context<'a>) -> Expr {
             increment: increment.map(parse_boxed_expr),
         },
         ast::Expr::ListComprehension {
-            steps,
+            lets,
             variables,
             body,
         } => Expr::ListComprehension {
-            steps: Vec::new(),
+            lets: Vec::new(),
             variables: parse_parameter_values(variables, context),
             body: parse_boxed_expr(body),
         },

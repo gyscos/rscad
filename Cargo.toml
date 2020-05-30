@@ -8,9 +8,7 @@ build = "build.rs"
 [dependencies]
 lalrpop-util = "0.19"
 regex = {version="1.0.6", features=["pattern"]}
+log = "0.4.8"
 
 [build-dependencies]
 lalrpop = { version = "0.19", features = ["lexer"] }
-
-[features]
-rebuild = []

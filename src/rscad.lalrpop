@@ -130,41 +130,48 @@ Argument: ParameterDefinition<'input> = {
     <name:Ident> "=" <default_value:Expr> => ParameterDefinition { name, default_value: Some(default_value) },
 }
 
-Let: Expr<'input> = {
-    "let" "(" <p:Parameters> ")" <t:Expr> => Expr::Let(p, Box::new(t)),
-}
 
 Expr: Expr<'input> = {
-    Let,
-    "-" <Let> => Expr::Negative(Box::new(<>)),  // Unary negative expression.
-    "!" <Let> => Expr::Not(Box::new(<>)),  // Unary negation
-    "+" <Let>,  // Noop "plus" expression.
+    <lets:Let+> <t:SubLet> => Expr::Let(lets, Box::new(t)),
+    SubLet,
+}
+
+SubLet: Expr<'input> = {
+    // First, lowest-priority operators: the ternary `a ? b : c`
     <a:SubTernary> "?" <b:Expr> ":" <c:Expr> => Expr::Ternary {
         condition: Box::new(a),
         if_true: Box::new(b),
         if_false: Box::new(c),
     },
+    // These operators cannot really be part of other operations.
+    "echo" "(" <p:Parameters> ")" <t:Expr> => Expr::Echo(p, Box::new(t)),
+    "assert" "(" <p:Parameters> ")" <t:Expr> => Expr::Assert(p, Box::new(t)),
     SubTernary,
 }
 
 SubTernary: Expr<'input> = {
-    <a:SubTernary> "||" <b:SubBitwise> => Expr::Or(Box::new(a), Box::new(b)),
-    <a:SubTernary> "&&" <b:SubBitwise> => Expr::And(Box::new(a), Box::new(b)),
-    SubBitwise,
+    // Next lowest-priority: boolean operations.
+    <a:SubTernary> "||" <b:SubBoolean> => Expr::Or(Box::new(a), Box::new(b)),
+    <a:SubTernary> "&&" <b:SubBoolean> => Expr::And(Box::new(a), Box::new(b)),
+    SubBoolean,
 }
 
-SubBitwise: Expr<'input> = {
-    <a:SubBitwise> <op:Compare> <b:SubCompare> => Expr::Op(Box::new(a), op, Box::new(b)),
+SubBoolean: Expr<'input> = {
+    // Comparison operators come next.
+    <a:SubBoolean> <op:Compare> <b:SubCompare> => Expr::Op(Box::new(a), op, Box::new(b)),
     SubCompare,
 }
 
 SubCompare: Expr<'input> = {
-    <a:SubCompare> <op:ExprOp> <b:Factor> => Expr::Op(Box::new(a), op, Box::new(b)),
-    Factor,
+    // After comparators, addition and subtraction.
+    <a:SubCompare> <op:ExprOp> <b:SubAddition> => Expr::Op(Box::new(a), op, Box::new(b)),
+    SubAddition,
 }
 
-Factor: Expr<'input> = {
-    <a:Factor> <op:FactorOp> <b:Negateable> => Expr::Op(Box::new(a), op, Box::new(b)),
+SubAddition: Expr<'input> = {
+    // After addition/subtraction, multiplication/division.
+    <a:SubAddition> <op:FactorOp> <b:Negateable> => Expr::Op(Box::new(a), op, Box::new(b)),
+    // This is also as low as let operations can go.
     Negateable,
 }
 
@@ -188,19 +195,15 @@ Compare: Opcode = {
     "<" => Opcode::Lt,
 }
 
-
-
 Negateable: Expr<'input> = {
     "-" <Negateable> => Expr::Negative(Box::new(<>)),
     "!" <Negateable> => Expr::Not(Box::new(<>)),
     "+" <Negateable>,
-    Echo
+    Term
 }
 
-Echo: Expr<'input> = {
-    "echo" "(" <p:Parameters> ")" <t:Echo> => Expr::Echo(p, Box::new(t)),
-    "assert" "(" <p:Parameters> ")" <t:Echo> => Expr::Assert(p, Box::new(t)),
-    Term,
+Let: Let<'input> = {
+    "let" "(" <vars:Parameters> ")" => Let{vars},
 }
 
 Term: Expr<'input> = {
@@ -210,12 +213,18 @@ Term: Expr<'input> = {
     <StrValue> => Expr::Text(<>),
     <Number> => Expr::Number(<>),
     <Ident> => Expr::Variable(<>),
+    <parent:Term> "." <field:Ident> => Expr::field_access(<>),
     "[" <Comma<Expr>> "]" => Expr::Vector(<>),
     "[" <start:Expr> <increment:(":" <Expr>)?> ":" <end:Expr> "]" => Expr::range(<>),
     Function => Expr::Function(<>),
     <array:Term> "[" <index:Expr> "]" => Expr::array_access(<>),
-    "[" <steps:Let*> "for" "(" <variables:Parameters> ")" <body:Expr> "]" => Expr::ListComprehension {
-        steps,
+    "[" "for" "(" <variables:Parameters> ")" <body:Expr> "]" => Expr::ListComprehension {
+        lets: vec![],
+        variables,
+        body: Box::new(body)
+    },
+    "[" <lets:Let+> "for" "(" <variables:Parameters> ")" <body:Expr> "]" => Expr::ListComprehension {
+        lets,
         variables,
         body: Box::new(body)
     },

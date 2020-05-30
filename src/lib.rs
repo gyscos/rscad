@@ -1,7 +1,9 @@
-pub mod ast;
-//lalrpop_mod!(rscad);
-mod rscad;
+#[macro_use]
+extern crate lalrpop_util;
 
+lalrpop_util::lalrpop_mod!(rscad);
+
+pub mod ast;
 mod interpreter;
 mod parser;
 

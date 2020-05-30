@@ -132,6 +132,12 @@ pub struct FunctionCall<'input> {
     pub parameters: Vec<ParameterValue<'input>>,
 }
 
+/// A local variable definition: `let (a=42)`
+#[derive(Clone, Debug)]
+pub struct Let<'input> {
+    pub vars: Vec<ParameterValue<'input>>,
+}
+
 /// An expression in the AST. Directly what lalrpop produces.
 #[derive(Clone, Debug)]
 pub enum Expr<'input> {
@@ -156,11 +162,11 @@ pub enum Expr<'input> {
     /// Print something, the resolve the expression.
     Assert(Vec<ParameterValue<'input>>, Box<Expr<'input>>),
     /// Defines some local variables, then resolve the expression.
-    Let(Vec<ParameterValue<'input>>, Box<Expr<'input>>),
-    /// A list comprehension: [for(i = [1:4]) i*i]
+    Let(Vec<Let<'input>>, Box<Expr<'input>>),
+    /// A list comprehension: [let(n=5) for(i = [1:n]) i*i]
     ListComprehension {
-        /// Steps to execute before running the loop
-        steps: Vec<Expr<'input>>,
+        /// Variable definitions to run before the loop.
+        lets: Vec<Let<'input>>,
         /// Variables to loop over
         variables: Vec<ParameterValue<'input>>,
         /// Body of the loop
@@ -174,6 +180,11 @@ pub enum Expr<'input> {
     Or(Box<Expr<'input>>, Box<Expr<'input>>),
     /// `a || b`
     And(Box<Expr<'input>>, Box<Expr<'input>>),
+    /// Access a field from an object: `foobar.x`
+    FieldAccess {
+        parent: Box<Expr<'input>>,
+        field: &'input str,
+    },
     /// Access an array value: `a[2 + 3]`
     ArrayAccess {
         /// Array to index into
@@ -206,6 +217,11 @@ impl<'input> Expr<'input> {
         let array = Box::new(array);
         let index = Box::new(index);
         Expr::ArrayAccess { array, index }
+    }
+
+    pub(crate) fn field_access(parent: Expr<'input>, field: &'input str) -> Self {
+        let parent = Box::new(parent);
+        Expr::FieldAccess { parent, field }
     }
 
     pub(crate) fn range(start: Self, increment: Option<Self>, end: Self) -> Self {

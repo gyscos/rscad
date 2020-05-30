@@ -1,9 +1,4 @@
-extern crate regex;
-extern crate rscad;
-
 use std::io::Read;
-
-use regex::Regex;
 
 fn main() {
     let mut input = String::new();
