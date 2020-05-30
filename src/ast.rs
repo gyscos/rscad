@@ -3,7 +3,7 @@
 //! This does not know about any standard functions (like `sphere`, `import`, or even `if`  and `for`).
 
 /// An item in a SCAD scene.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Statement<'input> {
     /// Variable declaration
     VariableDeclaration(&'input str, Expr<'input>),
@@ -81,7 +81,7 @@ impl<'input> Statement<'input> {
 }
 
 /// Describes a function call: ex `sphere(1, center=true)`
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ModuleCall<'input> {
     /// Name of the function being called
     pub function: &'input str,
@@ -94,7 +94,7 @@ pub struct ModuleCall<'input> {
     pub modifier: Option<Modifier>,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Modifier {
     /// Do not render this element
     Disable,
@@ -107,7 +107,7 @@ pub enum Modifier {
 }
 
 /// A parameter given to a function, possibly named.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ParameterValue<'input> {
     /// Optional name for this parameter
     pub name: Option<&'input str>,
@@ -116,7 +116,7 @@ pub struct ParameterValue<'input> {
 }
 
 /// An argument in a function declaration, possibly with default value.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ParameterDefinition<'input> {
     /// Name of the parameter
     pub name: &'input str,
@@ -124,7 +124,7 @@ pub struct ParameterDefinition<'input> {
     pub default_value: Option<Expr<'input>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FunctionCall<'input> {
     /// Name of the function being called
     pub name: &'input str,
@@ -133,13 +133,13 @@ pub struct FunctionCall<'input> {
 }
 
 /// A local variable definition: `let (a=42)`
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Let<'input> {
     pub vars: Vec<ParameterValue<'input>>,
 }
 
 /// An expression in the AST. Directly what lalrpop produces.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Expr<'input> {
     /// Undefined expression.
     Undef,
@@ -237,7 +237,7 @@ impl<'input> Expr<'input> {
 }
 
 /// An operation between expressions
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Opcode {
     /// Multiplication
     Mul,
