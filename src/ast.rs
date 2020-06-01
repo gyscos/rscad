@@ -8,6 +8,9 @@ pub enum Statement<'input> {
     /// Variable declaration
     VariableDeclaration(&'input str, Expr<'input>),
 
+    /// A statement with a special modifier.
+    Modifier(Modifier, Box<Statement<'input>>),
+
     /// A statement block in { }
     StatementList(Vec<Statement<'input>>),
 
@@ -20,6 +23,8 @@ pub enum Statement<'input> {
         args: Vec<ParameterDefinition<'input>>,
         body: Box<Statement<'input>>,
     },
+
+    Let(Vec<Let<'input>>, Box<Statement<'input>>),
 
     /// Function definition
     FunctionDefinition(&'input str, Vec<ParameterDefinition<'input>>, Expr<'input>),
@@ -38,9 +43,7 @@ pub enum Statement<'input> {
         /// Variables looped over
         variables: Vec<ParameterValue<'input>>,
         /// Body of the for-loop
-        body: Vec<Statement<'input>>,
-        /// Optional modifier
-        modifier: Option<Modifier>,
+        body: Box<Statement<'input>>,
     },
 
     /// A comment (can be ignored)
@@ -51,27 +54,30 @@ pub enum Statement<'input> {
         /// Condition for this block
         condition: Expr<'input>,
         /// Body if the condition is true
-        if_true: Vec<Statement<'input>>,
+        if_true: Box<Statement<'input>>,
         /// Body if the condition is false
-        if_false: Vec<Statement<'input>>,
+        if_false: Box<Statement<'input>>,
     },
 }
 
 impl<'input> Statement<'input> {
-    pub(crate) fn make_if(condition: Expr<'input>, if_true: Vec<Statement<'input>>) -> Self {
+    pub(crate) fn make_if(condition: Expr<'input>, if_true: Statement<'input>) -> Self {
+        let if_true = Box::new(if_true);
+        let if_false = Box::new(Statement::NoOp);
         Statement::If {
             condition,
             if_true,
-            if_false: vec![],
+            if_false,
         }
     }
 
     pub(crate) fn make_if_else(
         condition: Expr<'input>,
-        if_true: Vec<Statement<'input>>,
+        if_true: Statement<'input>,
         if_false: Statement<'input>,
     ) -> Self {
-        let if_false = vec![if_false];
+        let if_true = Box::new(if_true);
+        let if_false = Box::new(if_false);
         Statement::If {
             condition,
             if_true,
@@ -88,21 +94,18 @@ pub struct ModuleCall<'input> {
     /// List of parameters given
     pub params: Vec<ParameterValue<'input>>,
     /// Children of the call, if any (used for `union`/`difference`/...)
-    pub children: Vec<Statement<'input>>,
-
-    /// Optional modifier
-    pub modifier: Option<Modifier>,
+    pub child: Box<Statement<'input>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Modifier {
-    /// Do not render this element
+    /// Do not render this element (*)
     Disable,
-    /// Only render this element
+    /// Only render this element (!)
     ShowOnly,
-    /// Highlight this element
+    /// Highlight this element (#)
     Highlight,
-    /// Make this element transparent
+    /// Make this element transparent (%)
     Transparent,
 }
 

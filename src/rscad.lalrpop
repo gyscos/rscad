@@ -19,34 +19,30 @@ match {
     _
 }
 
-// A statement in the doc
+// An item is a top-level action in the source.
 Item: Statement<'input> = {
+    // A group of items.
+    "{" <Item*> "}" =>
+        Statement::StatementList(<>),
     // Module definition - not an actual object.
-    "module" <name:Ident> "(" <args:Arguments> ")" <body:Item> => Statement::ModuleDefinition{
-        name,
-        args,
-        body: Box::new(body)
-    },
+    "module" <name:Ident> "(" <args:Arguments> ")" <body:Item> =>
+        Statement::ModuleDefinition{
+            name,
+            args,
+            body: Box::new(body)
+        },
     // Function definition - not an actual object.
-    "function" <Ident> "(" <Arguments> ")" "=" <Expr> ";" => Statement::FunctionDefinition(<>),
+    "function" <Ident> "(" <Arguments> ")" "=" <Expr> ";" =>
+        Statement::FunctionDefinition(<>),
+    // Include another file
     <IncludePath>,
+    // Use? What is that?
     <UsePath>,
+    // Declare an actual object.
     Statement,
-    "{" <Item*> "}" => Statement::StatementList(<>),
 }
 
-ClosedCall = ModuleCall<ClosedCallList>;
-OpenCall = ModuleCall<OpenCallList>;
-
-// Call a module
-ModuleCall<T>: Statement<'input> = {
-    // Single module call
-    <modifier:(Modifier)?> <function:ModuleName> "(" <params:Parameters> ")" <children:T> => Statement::ModuleCall(ModuleCall{<>}),
-
-    // for-list
-    <modifier:(Modifier)?> "for" "(" <variables:Parameters> ")" <body:T> => Statement::For{<>},
-}
-
+// Modules can use builtin names like echo, assert, let
 ModuleName: &'input str = {
     Ident,
     "echo",
@@ -61,43 +57,75 @@ Modifier: Modifier = {
     "%" => Modifier::Transparent,
 }
 
-CallList: Vec<Statement<'input>> = {
-    ClosedCallList,
-    OpenCallList,
-}
-
-// ClosedCallList is a closed list of statements. Cannot end with a dangling if.
-ClosedCallList: Vec<Statement<'input>> = {
-    ClosedStatement => vec![<>],
-    "{" <Statement*> "}" => <>
-}
-
-OpenCallList: Vec<Statement<'input>> = {
-    OpenStatement => vec![<>],
-}
-
-// Describe an actual object - not just a _definition_.
+// A statement describes what can come after a modifier.
+// No list allowed here.
 Statement: Statement<'input> = {
     OpenStatement,
     ClosedStatement,
 }
 
-
 // We're ending with a dangling if, so careful what comes next
 // Something "Open" means it _could_ be followed by an "else".
 OpenStatement: Statement<'input> = {
-    "if" "(" <Expr> ")" <CallList> => Statement::make_if(<>),
-    "if" "(" <Expr> ")" <ClosedCallList> "else" <OpenStatement> => Statement::make_if_else(<>),
-    OpenCall,
+    // Unclosed `if` is always open, no matter the body.
+    "if" "(" <Expr> ")" <StatementList<Statement>> => Statement::make_if(<>),
+    // A closed `if` carries over the closed-ness of the body.
+    "if" "(" <Expr> ")"
+        <StatementList<ClosedStatement>>
+    "else"
+        <OpenStatement> =>
+        Statement::make_if_else(<>),
+    // Adding modifiers just keep the closed-ness.
+    Modified<OpenStatement>,
+    // Module calls carry over the closed-ness of their bodies.
+    ModuleCall<OpenStatement>,
 }
 
 // We swear we cannot be a dangling "if"
 ClosedStatement: Statement<'input> = {
+    <Ident> "=" <Expr> ";" =>
+        Statement::VariableDeclaration(<>),
     ";" => Statement::NoOp,
-    "if" "(" <condition: Expr> ")" <if_true:ClosedCallList> "else" <if_false:ClosedCallList> => Statement::If{<>},
-    ClosedCall,
-    <Ident> "=" <Expr> ";" => Statement::VariableDeclaration(<>),
+    IfElse<StatementList<ClosedStatement>>,
+    ModuleCall<StatementList<ClosedStatement>>,
+    Modified<IfElse<StatementList<ClosedStatement>>>,
+    Modified<ModuleCall<StatementList<ClosedStatement>>>,
 }
+
+IfElse<T>: Statement<'input> = {
+    "if" "(" <Expr> ")"
+        <StatementList<ClosedStatement>>
+    "else"
+        <T> =>
+        Statement::make_if_else(<>),
+}
+
+// For cases where either a single object, or a list is allowed.
+// For example what can come after `translate()`.
+StatementList<T>: Statement<'input> = {
+    T,
+    "{" <StatementList<Statement>*> "}" => Statement::StatementList(<>),
+}
+
+Modified<T>: Statement<'input> = {
+    <m:Modifier> <t:T> => Statement::Modifier(m, Box::new(t)),
+}
+
+// Call a module
+ModuleCall<T>: Statement<'input> = {
+    // Single module call
+    <function:ModuleName> "(" <params:Parameters> ")" <child:Boxed<T>> =>
+        Statement::ModuleCall(ModuleCall{<>}),
+
+    // for-list
+    "for" "(" <variables:Parameters> ")" <body:Boxed<T>> =>
+        Statement::For{<>},
+}
+
+Boxed<T>: Box<Statement<'input>> = {
+    <t:T> => Box::new(t),
+}
+
 
 Ident: &'input str = {
     r"[$_a-zA-Z0-9]+\w*"
